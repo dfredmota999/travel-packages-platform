@@ -62,3 +62,8 @@ rodando localmente.
 ## Roadmap do projeto
 
 Ver checklist em [`docs/architecture.md`](docs/architecture.md#status-atual-do-projeto).
+
+# Diagramas
+
+<img width="623" height="683" alt="image" src="https://github.com/user-attachments/assets/1b4b21aa-35bc-4202-b170-1eace1bb662a" />
+
