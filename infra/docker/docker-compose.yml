@@ -1,0 +1,29 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: travel-packages-postgres
+    environment:
+      POSTGRES_USER: package_service
+      POSTGRES_PASSWORD: package_service
+      POSTGRES_DB: package_service
+      MULTIPLE_DATABASES: flight_service,hotel_service,car_rental_service,tour_service,payment_service
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-multiple-dbs.sh:/docker-entrypoint-initdb.d/init-multiple-dbs.sh
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: travel-packages-rabbitmq
+    ports:
+      - "5672:5672"   # protocolo AMQP
+      - "15672:15672" # painel de management (http://localhost:15672, guest/guest)
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+
+volumes:
+  postgres_data:
+  rabbitmq_data:

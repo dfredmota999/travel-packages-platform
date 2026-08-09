@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.travelplatform</groupId>
+    <artifactId>travel-packages-platform</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <packaging>pom</packaging>
+
+    <name>Travel Packages Platform</name>
+    <description>
+        Monorepo com os microsserviços da plataforma de compra de pacotes de viagem
+        (voo + hotel + carro + passeio). Cada módulo é um serviço Spring Boot independente,
+        com seu próprio parent (spring-boot-starter-parent), como se fosse um repo separado.
+    </description>
+
+    <modules>
+        <module>package-service</module>
+        <!-- próximos módulos: flight-service, hotel-service, car-rental-service,
+             tour-service, payment-service, notification-service -->
+    </modules>
+
+</project>
