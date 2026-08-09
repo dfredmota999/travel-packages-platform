@@ -1,0 +1,37 @@
+spring:
+  application:
+    name: flight-service
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/flight_service
+    username: package_service
+    password: package_service
+  jpa:
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        format_sql: true
+    open-in-view: false
+
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: guest
+    password: guest
+
+server:
+  port: 8082
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, metrics
+  endpoint:
+    health:
+      show-details: always
+
+logging:
+  level:
+    com.travelplatform: DEBUG

@@ -1,17 +1,37 @@
 package com.travelplatform.packageservice.domain;
 
-import jakarta.persistence.Embeddable;
+import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.MapsId;
+import jakarta.persistence.OneToOne;
+import jakarta.persistence.Table;
 import java.time.LocalDate;
+import java.util.UUID;
 
 /**
- * Value object: representa a reserva de voo dentro do agregado TravelPackage.
- * Não tem identidade própria fora do pacote — é comparado por valor, não por ID.
- * O "reservationId" é o identificador que o flight-service devolve quando confirma.
+ * Entidade filha em tabela própria (flight_bookings), ligada ao TravelPackage
+ * por chave primária compartilhada (@MapsId): o id desta tabela é o MESMO id
+ * do pacote dono. Isso evita gerar/guardar uma FK redundante e, como bônus,
+ * permite que o @OneToOne(fetch = LAZY) funcione de verdade — normalmente o
+ * Hibernate ignora LAZY em @OneToOne comum (porque precisa de uma query extra
+ * só pra saber se o relacionamento existe), mas com PK compartilhada ele já
+ * sabe o id de antemão e consegue criar um proxy sem tocar o banco.
  */
-@Embeddable
+@Entity
+@Table(name = "flight_bookings")
 public class FlightBooking {
+
+    @Id
+    private UUID packageId;
+
+    @OneToOne(fetch = FetchType.LAZY, optional = false)
+    @MapsId
+    @JoinColumn(name = "package_id")
+    private TravelPackage travelPackage;
 
     private String offerId;
     private String origin;
@@ -37,6 +57,11 @@ public class FlightBooking {
         this.returnDate = returnDate;
         this.passengers = passengers;
         this.status = BookingItemStatus.PENDING;
+    }
+
+    /** Liga este item ao pacote dono — necessário para o @MapsId derivar o id compartilhado. */
+    void attachTo(TravelPackage travelPackage) {
+        this.travelPackage = travelPackage;
     }
 
     public void confirm(String reservationId) {

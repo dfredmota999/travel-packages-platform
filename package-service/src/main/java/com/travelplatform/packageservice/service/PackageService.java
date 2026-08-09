@@ -16,11 +16,6 @@ public class PackageService {
         this.repository = repository;
     }
 
-    /**
-     * Cria o pacote em estado CREATED e persiste.
-     * TODO (próxima etapa): publicar evento "PackageCreated" no RabbitMQ para
-     * disparar a saga de reserva (voo/hotel/carro/passeio) de forma assíncrona.
-     */
     @Transactional
     public TravelPackage create(TravelPackage travelPackage) {
         return repository.save(travelPackage);
@@ -28,7 +23,16 @@ public class PackageService {
 
     @Transactional(readOnly = true)
     public TravelPackage findById(UUID id) {
-        return repository.findById(id)
+        return repository.findWithItemsById(id)
                 .orElseThrow(() -> new PackageNotFoundException(id));
+    }
+
+    /** Usado pelo SagaOrchestrator: carrega, aplica a mudança de domínio (via callback) e salva na mesma transação. */
+    @Transactional
+    public TravelPackage update(UUID id, java.util.function.Consumer<TravelPackage> mutation) {
+        TravelPackage travelPackage = repository.findWithItemsById(id)
+                .orElseThrow(() -> new PackageNotFoundException(id));
+        mutation.accept(travelPackage);
+        return repository.save(travelPackage);
     }
 }

@@ -8,7 +8,7 @@ services:
       POSTGRES_USER: package_service
       POSTGRES_PASSWORD: package_service
       POSTGRES_DB: package_service
-      MULTIPLE_DATABASES: flight_service,hotel_service,car_rental_service,tour_service,payment_service
+      MULTIPLE_DATABASES: flight_service,hotel_service,car_reservation_service,tour_service,payment_service
     ports:
       - "5432:5432"
     volumes:

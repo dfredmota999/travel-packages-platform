@@ -1,9 +1,11 @@
 package com.travelplatform.packageservice.web.dto;
 
 import com.travelplatform.packageservice.domain.BookingItemStatus;
+import com.travelplatform.packageservice.domain.ItemType;
 import com.travelplatform.packageservice.domain.PackageStatus;
 import com.travelplatform.packageservice.domain.TravelPackage;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 public record PackageResponse(
@@ -12,29 +14,22 @@ public record PackageResponse(
         PackageStatus status,
         Instant createdAt,
         Instant updatedAt,
-        ItemStatus flight,
-        ItemStatus hotel,
-        ItemStatus carRental,
-        ItemStatus tour,
-        ItemStatus payment
+        List<ItemResponse> items,
+        ItemResponse payment
 ) {
 
-    public record ItemStatus(BookingItemStatus status, String reservationId) {
+    public record ItemResponse(ItemType itemType, String offerId, String reservationId, BookingItemStatus status) {
     }
 
     public static PackageResponse from(TravelPackage p) {
-        return new PackageResponse(
-                p.getId(),
-                p.getCustomerId(),
-                p.getStatus(),
-                p.getCreatedAt(),
-                p.getUpdatedAt(),
-                new ItemStatus(p.getFlightBooking().getStatus(), p.getFlightBooking().getReservationId()),
-                new ItemStatus(p.getHotelBooking().getStatus(), p.getHotelBooking().getReservationId()),
-                new ItemStatus(p.getCarRentalBooking().getStatus(), p.getCarRentalBooking().getReservationId()),
-                new ItemStatus(p.getTourBooking().getStatus(), p.getTourBooking().getReservationId()),
-                new ItemStatus(p.getPaymentInfo() != null ? p.getPaymentInfo().getStatus() : BookingItemStatus.NOT_REQUESTED,
-                        p.getPaymentInfo() != null ? p.getPaymentInfo().getTransactionId() : null)
-        );
+        List<ItemResponse> items = p.getItems().stream()
+                .map(i -> new ItemResponse(i.getItemType(), i.getOfferId(), i.getReservationId(), i.getStatus()))
+                .toList();
+
+        ItemResponse payment = p.getPaymentInfo() == null ? null : new ItemResponse(
+                null, null, p.getPaymentInfo().getTransactionId(), p.getPaymentInfo().getStatus());
+
+        return new PackageResponse(p.getId(), p.getCustomerId(), p.getStatus(),
+                p.getCreatedAt(), p.getUpdatedAt(), items, payment);
     }
 }

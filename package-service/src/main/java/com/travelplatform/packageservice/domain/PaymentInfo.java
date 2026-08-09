@@ -1,11 +1,27 @@
 package com.travelplatform.packageservice.domain;
 
-import jakarta.persistence.Embeddable;
+import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.MapsId;
+import jakarta.persistence.OneToOne;
+import jakarta.persistence.Table;
+import java.util.UUID;
 
-@Embeddable
+@Entity
+@Table(name = "payment_info")
 public class PaymentInfo {
+
+    @Id
+    private UUID packageId;
+
+    @OneToOne(fetch = FetchType.LAZY, optional = false)
+    @MapsId
+    @JoinColumn(name = "package_id")
+    private TravelPackage travelPackage;
 
     @Enumerated(EnumType.STRING)
     private PaymentMethodType type;
@@ -23,6 +39,10 @@ public class PaymentInfo {
         this.type = type;
         this.installments = installments;
         this.status = BookingItemStatus.PENDING;
+    }
+
+    void attachTo(TravelPackage travelPackage) {
+        this.travelPackage = travelPackage;
     }
 
     public void confirm(String transactionId) {

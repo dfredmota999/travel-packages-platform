@@ -2,6 +2,7 @@ package com.travelplatform.packageservice.web;
 
 import com.travelplatform.packageservice.domain.TravelPackage;
 import com.travelplatform.packageservice.service.PackageService;
+import com.travelplatform.packageservice.service.SagaOrchestrator;
 import com.travelplatform.packageservice.web.dto.CreatePackageRequest;
 import com.travelplatform.packageservice.web.dto.PackageResponse;
 import jakarta.validation.Valid;
@@ -21,21 +22,24 @@ public class PackageController {
 
     private final PackageService packageService;
     private final PackageMapper packageMapper;
+    private final SagaOrchestrator sagaOrchestrator;
 
-    public PackageController(PackageService packageService, PackageMapper packageMapper) {
+    public PackageController(PackageService packageService, PackageMapper packageMapper, SagaOrchestrator sagaOrchestrator) {
         this.packageService = packageService;
         this.packageMapper = packageMapper;
+        this.sagaOrchestrator = sagaOrchestrator;
     }
 
     /**
-     * Cria um pacote. A resposta é 202 Accepted porque a reserva efetiva dos
-     * itens (voo/hotel/carro/passeio) roda de forma assíncrona via saga —
-     * o cliente consulta o status depois em GET /api/packages/{id}.
+     * Cria o pacote (status CREATED) e imediatamente dispara a saga, que passa
+     * a rodar em background via RabbitMQ. A resposta é 202 Accepted — o cliente
+     * consulta o progresso em GET /api/packages/{id}.
      */
     @PostMapping
     public ResponseEntity<PackageResponse> create(@Valid @RequestBody CreatePackageRequest request) {
         TravelPackage travelPackage = packageMapper.toDomain(request);
         TravelPackage saved = packageService.create(travelPackage);
+        sagaOrchestrator.startSaga(saved);
 
         URI location = URI.create("/api/packages/" + saved.getId());
         return ResponseEntity.accepted().location(location).body(PackageResponse.from(saved));

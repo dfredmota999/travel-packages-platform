@@ -1,12 +1,28 @@
 package com.travelplatform.packageservice.domain;
 
-import jakarta.persistence.Embeddable;
+import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.MapsId;
+import jakarta.persistence.OneToOne;
+import jakarta.persistence.Table;
 import java.time.LocalDate;
+import java.util.UUID;
 
-@Embeddable
+@Entity
+@Table(name = "tour_bookings")
 public class TourBooking {
+
+    @Id
+    private UUID packageId;
+
+    @OneToOne(fetch = FetchType.LAZY, optional = false)
+    @MapsId
+    @JoinColumn(name = "package_id")
+    private TravelPackage travelPackage;
 
     private String offerId;
     private LocalDate date;
@@ -24,6 +40,10 @@ public class TourBooking {
         this.date = date;
         this.participants = participants;
         this.status = BookingItemStatus.PENDING;
+    }
+
+    void attachTo(TravelPackage travelPackage) {
+        this.travelPackage = travelPackage;
     }
 
     public void confirm(String reservationId) {

@@ -1,25 +1,27 @@
 package com.travelplatform.packageservice.domain;
 
-import jakarta.persistence.AttributeOverride;
-import jakarta.persistence.AttributeOverrides;
-import jakarta.persistence.Column;
-import jakarta.persistence.Embedded;
+import jakarta.persistence.CascadeType;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
 import jakarta.persistence.Id;
+import jakarta.persistence.OneToMany;
+import jakarta.persistence.OneToOne;
 import jakarta.persistence.Table;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 /**
- * Aggregate root do domínio de compra de pacotes.
- * Toda alteração de estado dos itens (voo/hotel/carro/passeio/pagamento) deve
- * passar por aqui — os value objects não são acessados/persistidos fora do agregado.
+ * Aggregate root. `items` é uma lista enxuta (ver PackageItem) — só entram
+ * na lista os itens que o cliente realmente pediu, então não existe mais o
+ * conceito de "item NOT_REQUESTED" que tínhamos antes com os 4 campos fixos.
  *
- * A saga (próxima etapa) vai orquestrar comandos assíncronos via RabbitMQ e,
- * a cada resposta recebida, chamar um dos métodos de domínio abaixo para
- * avançar o estado do pacote.
+ * A saga (SagaOrchestrator) chama confirmItem/rejectItem/cancelItem conforme
+ * os eventos chegam do RabbitMQ, e este agregado decide as transições de
+ * status do pacote como um todo.
  */
 @Entity
 @Table(name = "travel_packages")
@@ -36,62 +38,10 @@ public class TravelPackage {
     private Instant createdAt;
     private Instant updatedAt;
 
-    // Cada @Embeddable de item (Flight/Hotel/CarRental/Tour) tem campos com o
-    // mesmo nome (offerId, status, reservationId...). Sem @AttributeOverrides,
-    // o Hibernate geraria colunas duplicadas na tabela travel_packages.
-    @Embedded
-    @AttributeOverrides({
-            @AttributeOverride(name = "offerId", column = @Column(name = "flight_offer_id")),
-            @AttributeOverride(name = "origin", column = @Column(name = "flight_origin")),
-            @AttributeOverride(name = "destination", column = @Column(name = "flight_destination")),
-            @AttributeOverride(name = "departureDate", column = @Column(name = "flight_departure_date")),
-            @AttributeOverride(name = "returnDate", column = @Column(name = "flight_return_date")),
-            @AttributeOverride(name = "passengers", column = @Column(name = "flight_passengers")),
-            @AttributeOverride(name = "reservationId", column = @Column(name = "flight_reservation_id")),
-            @AttributeOverride(name = "status", column = @Column(name = "flight_status"))
-    })
-    private FlightBooking flightBooking;
+    @OneToMany(mappedBy = "travelPackage", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
+    private List<PackageItem> items = new ArrayList<>();
 
-    @Embedded
-    @AttributeOverrides({
-            @AttributeOverride(name = "offerId", column = @Column(name = "hotel_offer_id")),
-            @AttributeOverride(name = "checkIn", column = @Column(name = "hotel_check_in")),
-            @AttributeOverride(name = "checkOut", column = @Column(name = "hotel_check_out")),
-            @AttributeOverride(name = "roomType", column = @Column(name = "hotel_room_type")),
-            @AttributeOverride(name = "guests", column = @Column(name = "hotel_guests")),
-            @AttributeOverride(name = "reservationId", column = @Column(name = "hotel_reservation_id")),
-            @AttributeOverride(name = "status", column = @Column(name = "hotel_status"))
-    })
-    private HotelBooking hotelBooking;
-
-    @Embedded
-    @AttributeOverrides({
-            @AttributeOverride(name = "offerId", column = @Column(name = "car_offer_id")),
-            @AttributeOverride(name = "pickupDate", column = @Column(name = "car_pickup_date")),
-            @AttributeOverride(name = "returnDate", column = @Column(name = "car_return_date")),
-            @AttributeOverride(name = "category", column = @Column(name = "car_category")),
-            @AttributeOverride(name = "reservationId", column = @Column(name = "car_reservation_id")),
-            @AttributeOverride(name = "status", column = @Column(name = "car_status"))
-    })
-    private CarRentalBooking carRentalBooking;
-
-    @Embedded
-    @AttributeOverrides({
-            @AttributeOverride(name = "offerId", column = @Column(name = "tour_offer_id")),
-            @AttributeOverride(name = "date", column = @Column(name = "tour_date")),
-            @AttributeOverride(name = "participants", column = @Column(name = "tour_participants")),
-            @AttributeOverride(name = "reservationId", column = @Column(name = "tour_reservation_id")),
-            @AttributeOverride(name = "status", column = @Column(name = "tour_status"))
-    })
-    private TourBooking tourBooking;
-
-    @Embedded
-    @AttributeOverrides({
-            @AttributeOverride(name = "type", column = @Column(name = "payment_type")),
-            @AttributeOverride(name = "installments", column = @Column(name = "payment_installments")),
-            @AttributeOverride(name = "transactionId", column = @Column(name = "payment_transaction_id")),
-            @AttributeOverride(name = "status", column = @Column(name = "payment_status"))
-    })
+    @OneToOne(mappedBy = "travelPackage", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     private PaymentInfo paymentInfo;
 
     protected TravelPackage() {
@@ -104,43 +54,22 @@ public class TravelPackage {
         this.status = PackageStatus.CREATED;
         this.createdAt = Instant.now();
         this.updatedAt = this.createdAt;
-        this.flightBooking = new FlightBooking(null, null, null, null, null, 0);
-        this.hotelBooking = new HotelBooking(null, null, null, null, 0);
-        this.carRentalBooking = new CarRentalBooking(null, null, null, null);
-        this.tourBooking = new TourBooking(null, null, 0);
     }
 
-    /**
-     * Factory method — força a criação do pacote a passar por aqui em vez de
-     * expor um construtor público, garantindo que o agregado nasça em estado válido.
-     */
-    public static TravelPackage create(String customerId,
-                                        FlightBooking flightBooking,
-                                        HotelBooking hotelBooking,
-                                        CarRentalBooking carRentalBooking,
-                                        TourBooking tourBooking,
-                                        PaymentInfo paymentInfo) {
+    public static TravelPackage create(String customerId, List<PackageItem> requestedItems, PaymentInfo paymentInfo) {
         if (customerId == null || customerId.isBlank()) {
             throw new IllegalArgumentException("customerId é obrigatório");
         }
-        if (flightBooking == null && hotelBooking == null
-                && carRentalBooking == null && tourBooking == null) {
+        if (requestedItems == null || requestedItems.isEmpty()) {
             throw new IllegalArgumentException("o pacote precisa ter ao menos um item (voo, hotel, carro ou passeio)");
         }
 
         TravelPackage travelPackage = new TravelPackage(customerId);
-        if (flightBooking != null) {
-            travelPackage.flightBooking = flightBooking;
+        for (PackageItem item : requestedItems) {
+            item.attachTo(travelPackage);
+            travelPackage.items.add(item);
         }
-        if (hotelBooking != null) {
-            travelPackage.hotelBooking = hotelBooking;
-        }
-        if (carRentalBooking != null) {
-            travelPackage.carRentalBooking = carRentalBooking;
-        }
-        if (tourBooking != null) {
-            travelPackage.tourBooking = tourBooking;
-        }
+        paymentInfo.attachTo(travelPackage);
         travelPackage.paymentInfo = paymentInfo;
         return travelPackage;
     }
@@ -151,7 +80,36 @@ public class TravelPackage {
         touch();
     }
 
-    /** Chamado pela saga quando todos os itens solicitados foram confirmados. */
+    public void confirmItem(ItemType type, String reservationId) {
+        findItem(type).confirm(reservationId);
+        touch();
+    }
+
+    public void rejectItem(ItemType type) {
+        findItem(type).reject();
+        touch();
+    }
+
+    public void cancelItem(ItemType type) {
+        findItem(type).cancel();
+        touch();
+    }
+
+    public boolean hasItem(ItemType type) {
+        return items.stream().anyMatch(i -> i.getItemType() == type);
+    }
+
+    /** Itens já CONFIRMED, exceto o tipo informado — é pra esses que a saga manda cmd.cancel na compensação. */
+    public List<PackageItem> confirmedItemsExcept(ItemType exceptType) {
+        return items.stream()
+                .filter(i -> i.getItemType() != exceptType && i.getStatus() == BookingItemStatus.CONFIRMED)
+                .toList();
+    }
+
+    public boolean allItemsConfirmed() {
+        return items.stream().allMatch(i -> i.getStatus() == BookingItemStatus.CONFIRMED);
+    }
+
     public void markAwaitingPayment() {
         requireStatus(PackageStatus.PROCESSING);
         this.status = PackageStatus.AWAITING_PAYMENT;
@@ -164,7 +122,6 @@ public class TravelPackage {
         touch();
     }
 
-    /** Chamado quando algum item é rejeitado — a saga inicia compensação dos demais. */
     public void startCompensating() {
         this.status = PackageStatus.COMPENSATING;
         touch();
@@ -180,16 +137,11 @@ public class TravelPackage {
         touch();
     }
 
-    /** Verifica se todos os itens solicitados (isRequested) já estão CONFIRMED. */
-    public boolean allRequestedItemsConfirmed() {
-        return isConfirmedOrNotRequested(flightBooking.isRequested(), flightBooking.getStatus())
-                && isConfirmedOrNotRequested(hotelBooking.isRequested(), hotelBooking.getStatus())
-                && isConfirmedOrNotRequested(carRentalBooking.isRequested(), carRentalBooking.getStatus())
-                && isConfirmedOrNotRequested(tourBooking.isRequested(), tourBooking.getStatus());
-    }
-
-    private boolean isConfirmedOrNotRequested(boolean requested, BookingItemStatus status) {
-        return !requested || status == BookingItemStatus.CONFIRMED;
+    private PackageItem findItem(ItemType type) {
+        return items.stream()
+                .filter(i -> i.getItemType() == type)
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException("Pacote não tem item do tipo " + type));
     }
 
     private void requireStatus(PackageStatus expected) {
@@ -223,20 +175,8 @@ public class TravelPackage {
         return updatedAt;
     }
 
-    public FlightBooking getFlightBooking() {
-        return flightBooking;
-    }
-
-    public HotelBooking getHotelBooking() {
-        return hotelBooking;
-    }
-
-    public CarRentalBooking getCarRentalBooking() {
-        return carRentalBooking;
-    }
-
-    public TourBooking getTourBooking() {
-        return tourBooking;
+    public List<PackageItem> getItems() {
+        return items;
     }
 
     public PaymentInfo getPaymentInfo() {

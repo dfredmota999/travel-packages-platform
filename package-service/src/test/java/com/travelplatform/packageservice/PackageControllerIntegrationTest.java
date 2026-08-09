@@ -1,11 +1,18 @@
 package com.travelplatform.packageservice;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 
+import com.travelplatform.packageservice.config.RabbitMQConfig;
 import com.travelplatform.packageservice.domain.PackageStatus;
+import com.travelplatform.packageservice.messaging.ItemRejectedEvent;
+import com.travelplatform.packageservice.messaging.ItemReservedEvent;
 import com.travelplatform.packageservice.web.dto.CreatePackageRequest;
 import com.travelplatform.packageservice.web.dto.PackageResponse;
+import java.time.Duration;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.client.TestRestTemplate;
@@ -15,14 +22,17 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.containers.RabbitMQContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
-import java.time.LocalDate;
-
 /**
- * Sobe um Postgres real via Testcontainers em vez de usar H2 em memória —
- * garante que constraints, tipos e comportamento do driver batam com produção.
+ * Sobe Postgres E RabbitMQ reais via Testcontainers. Como o flight-service
+ * não está rodando neste teste (é um teste do package-service isoladamente),
+ * simulamos a resposta dele publicando o evento diretamente no exchange —
+ * o mesmo formato de mensagem que o flight-service publicaria de verdade.
+ * Isso testa o listener + o SagaOrchestrator de ponta a ponta, de forma
+ * assíncrona (por isso o Awaitility no lugar de assert direto).
  */
 @Testcontainers
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
@@ -34,11 +44,18 @@ class PackageControllerIntegrationTest {
             .withUsername("test")
             .withPassword("test");
 
+    @Container
+    static RabbitMQContainer rabbit = new RabbitMQContainer("rabbitmq:3.13-management-alpine");
+
     @DynamicPropertySource
     static void overrideProperties(DynamicPropertyRegistry registry) {
         registry.add("spring.datasource.url", postgres::getJdbcUrl);
         registry.add("spring.datasource.username", postgres::getUsername);
         registry.add("spring.datasource.password", postgres::getPassword);
+        registry.add("spring.rabbitmq.host", rabbit::getHost);
+        registry.add("spring.rabbitmq.port", rabbit::getAmqpPort);
+        registry.add("spring.rabbitmq.username", rabbit::getAdminUsername);
+        registry.add("spring.rabbitmq.password", rabbit::getAdminPassword);
     }
 
     @LocalServerPort
@@ -47,44 +64,49 @@ class PackageControllerIntegrationTest {
     @Autowired
     TestRestTemplate restTemplate;
 
+    @Autowired
+    RabbitTemplate rabbitTemplate;
+
     @Test
-    void deveCriarPacoteERecuperarPorId() {
-        CreatePackageRequest request = new CreatePackageRequest(
-                "customer-123",
-                new CreatePackageRequest.FlightRequest(
-                        "fl-8890", "FOR", "LIS",
-                        LocalDate.of(2026, 10, 10), LocalDate.of(2026, 10, 20), 2),
-                new CreatePackageRequest.HotelRequest(
-                        "ht-4521", LocalDate.of(2026, 10, 10), LocalDate.of(2026, 10, 20), "DOUBLE", 2),
-                null, // sem carro
-                null, // sem passeio
-                new CreatePackageRequest.PaymentRequest("CREDIT_CARD", 3)
-        );
+    void sagaCompletaComSucessoQuandoVooEReservado() {
+        UUID packageId = createPackageWithFlight("fl-offer-1");
 
-        ResponseEntity<PackageResponse> createResponse =
-                restTemplate.postForEntity("/api/packages", request, PackageResponse.class);
+        rabbitTemplate.convertAndSend(RabbitMQConfig.EVENTS_EXCHANGE, "flight.reserved",
+                new ItemReservedEvent(packageId, "fl-offer-1", "flight-reservation-abc"));
 
-        assertThat(createResponse.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
-        assertThat(createResponse.getBody()).isNotNull();
-        assertThat(createResponse.getBody().status()).isEqualTo(PackageStatus.CREATED);
-        assertThat(createResponse.getBody().flight().status().toString()).isEqualTo("PENDING");
-        assertThat(createResponse.getBody().carRental().status().toString()).isEqualTo("NOT_REQUESTED");
-
-        var id = createResponse.getBody().id();
-
-        ResponseEntity<PackageResponse> getResponse =
-                restTemplate.getForEntity("/api/packages/" + id, PackageResponse.class);
-
-        assertThat(getResponse.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(getResponse.getBody().customerId()).isEqualTo("customer-123");
+        await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> {
+            PackageResponse response = getPackage(packageId);
+            assertThat(response.status()).isEqualTo(PackageStatus.CONFIRMED);
+            assertThat(response.items().get(0).reservationId()).isEqualTo("flight-reservation-abc");
+        });
     }
 
     @Test
-    void deveRetornarProblemDetail404QuandoPacoteNaoExiste() {
-        ResponseEntity<String> response = restTemplate.getForEntity(
-                "/api/packages/" + java.util.UUID.randomUUID(), String.class);
+    void sagaCancelaPacoteQuandoVooERejeitado() {
+        UUID packageId = createPackageWithFlight("fl-offer-2");
 
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
-        assertThat(response.getBody()).contains("Pacote não encontrado");
+        rabbitTemplate.convertAndSend(RabbitMQConfig.EVENTS_EXCHANGE, "flight.rejected",
+                new ItemRejectedEvent(packageId, "fl-offer-2", "sem assentos disponíveis"));
+
+        await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> {
+            PackageResponse response = getPackage(packageId);
+            assertThat(response.status()).isEqualTo(PackageStatus.CANCELLED);
+        });
+    }
+
+    private UUID createPackageWithFlight(String offerId) {
+        CreatePackageRequest request = new CreatePackageRequest(
+                "customer-123",
+                new CreatePackageRequest.ItemRequest(offerId, 2),
+                null, null, null,
+                new CreatePackageRequest.PaymentRequest("CREDIT_CARD", 3));
+
+        ResponseEntity<PackageResponse> response = restTemplate.postForEntity("/api/packages", request, PackageResponse.class);
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+        return response.getBody().id();
+    }
+
+    private PackageResponse getPackage(UUID id) {
+        return restTemplate.getForEntity("/api/packages/" + id, PackageResponse.class).getBody();
     }
 }

@@ -18,8 +18,11 @@
 
     <modules>
         <module>package-service</module>
-        <!-- próximos módulos: flight-service, hotel-service, car-rental-service,
-             tour-service, payment-service, notification-service -->
+        <module>flight-service</module>
+        <module>hotel-service</module>
+        <module>car-reservation-service</module>
+        <module>tour-service</module>
+        <!-- próximos módulos: payment-service, notification-service -->
     </modules>
 
 </project>
